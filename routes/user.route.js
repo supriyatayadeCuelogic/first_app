@@ -12,5 +12,6 @@ router.get('/:id',usrCntl.validateToken,usrCntl.getUser);
 router.post('/login',usrCntl.login);
 router.get('/',usrCntl.validateToken,usrCntl.getAllUser);
 router.put('/:id/update',usrCntl.validateToken,usrCntl.update);
+router.get('/get/loginUserList',usrCntl.validateToken,usrCntl.getLoginUsers);
 
 module.exports = router;

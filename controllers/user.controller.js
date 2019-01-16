@@ -7,6 +7,7 @@ var hash = bcrypt.hashSync("bacon");
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
 const requestIp = require('request-ip');
+const responseHandler = require('../util/responseHandler');
 
 //Simple version, without validation or sanitation
 exports.test = function (req, res) {
@@ -27,36 +28,25 @@ exports.create = function (req, res) {
 
             Joi.validate(req.body, schema, function (err, value) {
                 if (err) {
-                    res.json({
-                        success: false,
-                        message: 'Operation failed',
-                        errors: err
-                    });
+                    responseHandler.sendError(err, res);
                 } else {
                     next();
                 }
             });
         },
-        function(next){
-            UserModel.find({user_name: req.body.user_name}, function (err, result) {
-                if (err || result){
-                    res.status(200).json({
-                        success:false,
-                        'message': 'Username already exists',                        
-                    });
-                }else{
+        function (next) {
+            UserModel.find({ user_name: req.body.user_name }, function (err, result) {
+                if (err || result) {
+                    responseHandler.sendError('Username already exists', res);
+                } else {
                     next();
-                }                
+                }
             })
         },
         function (next) {
             bcrypt.hash("bacon", null, null, function (err, hash) {
                 if (err) {
-                    res.json({
-                        success: false,
-                        message: 'Operation failed',
-                        errors: err
-                    });
+                    responseHandler.sendError(err, res);
                 } else {
                     next(null, hash);
                 }
@@ -79,34 +69,28 @@ exports.create = function (req, res) {
         }
     ], function (err, result) {
         if (err) {
-            res.json({
-                success: false,
-                message: 'Operation failed',
-                errors: err
-            });
+            responseHandler.sendError(err, res);
         } else {
-            res.status(200).json({
-                success: false,
-                message: 'Operation successfull',
-                data: {
-                    first_name: result.first_name,
-                    last_name: result.last_name,
-                    age: result.age,
-                    user_name: result.user_name,
-                    id: result._id
-                }
-            });
+            var data = {
+                first_name: result.first_name,
+                last_name: result.last_name,
+                age: result.age,
+                user_name: result.user_name,
+                id: result._id
+            }
+            responseHandler.sendData(data, res);
         }
     });
 };
 
 exports.getUser = function (req, res) {
     UserModel.findById(req.params.id, { first_name: true, last_name: true, user_name: true }, function (err, result) {
-        if (err) return res.send({ 'error': err });;
-        res.status(200).send({
-            'message': 'Operation Successfull',
-            'data': result
-        });
+        if (err) {
+            responseHandler.sendError(err, res);
+        } else {
+            responseHandler.sendData(result, res);
+        }
+
     })
 };
 
@@ -120,7 +104,7 @@ exports.login = function (req, res) {
 
             Joi.validate(req.body, schema, function (err, value) {
                 if (err) {
-                    res.send({ 'error': err });
+                    responseHandler.sendError(err, res);
                 } else {
                     next();
                 }
@@ -128,7 +112,9 @@ exports.login = function (req, res) {
         },
         function (next) {
             UserModel.find({ user_name: req.body.user_name }, function (err, result) {
-                if (err) return next(err);
+                if (err) {
+                    responseHandler.sendError(err, res);
+                }
                 else {
                     next(null, result);
                 }
@@ -137,7 +123,7 @@ exports.login = function (req, res) {
         function (userData, next) {
             bcrypt.compare("bacon", userData[0].password, function (err, res) {
                 if (err || !res) {
-                    res.send({ 'error': 'Invalid password' });
+                    responseHandler.sendError('Invalid password', res);
                 } else {
                     next(null, userData[0]);
                 }
@@ -155,7 +141,7 @@ exports.login = function (req, res) {
         }
     ], function (err, result) {
         if (err) {
-            res.send({ 'error': err });
+            return responseHandler.sendError(err, res);
         } else {
             let token = jwt.sign({ username: result.user_name, user_id: result._id },
                 config.secret,
@@ -163,87 +149,88 @@ exports.login = function (req, res) {
                     expiresIn: '24h'
                 }
             );
-            res.status(200).send({
-                'message': 'User Created successfully',
-                'data': {
-                    first_name: result.first_name,
-                    last_name: result.last_name,
-                    age: result.age,
-                    user_name: result.user_name,
-                    id: result._id
-                },
-                token: token
-            });
+            var user = {
+                first_name: result.first_name,
+                last_name: result.last_name,
+                age: result.age,
+                user_name: result.user_name,
+                id: result._id
+            }
+            var data = { user: user, token: token };
         }
+        responseHandler.sendData(data, res);
     })
 }
 
 exports.getAllUser = function (req, res) {
     UserModel.find({}, { first_name: true, last_name: true, user_name: true }, function (err, result) {
-        if (err) return res.send({ 'error': err });;
-        res.status(200).send({
-            'message': 'Operation Successfull',
-            'data': result
-        });
+        if (err) {
+            responseHandler.sendError(err, res);
+        } else if (result) {
+            responseHandler.sendData(result, res);
+        } else {
+            responseHandler.sendError('No record found', res);
+        }
     }).limit(req.body.limit || 10).skip(req.body.offset || 0);
 };
 
 exports.validateToken = function (req, res, next) {
     if (!req.headers['authorization']) {
-        return res.json({
-            success: false,
-            message: 'Auth Token required'
-        });
+        responseHandler.sendError('Auth Token required', res);
     }
 
     let token = req.headers['authorization'];
 
-    if (token.startsWith('Bearer ')) {
+    if (token.startsWith('Bearer ') || token.startsWith('bearer ')) {
         token = token.slice(7, token.length);
     }
 
     if (token) {
         jwt.verify(token, config.secret, (err, decoded) => {
             if (err) {
-                return res.json({
-                    success: false,
-                    message: 'Token is not valid'
-                });
+                responseHandler.sendError('Token is not valid', res);
             } else {
                 req.decoded = decoded;
                 next();
             }
         });
     } else {
-        return res.json({
-            success: false,
-            message: 'Auth token is not supplied'
-        });
+        responseHandler.sendError('Auth token is not supplied', res);
     }
-}
+};
 
 exports.update = function (req, res) {
     async.waterfall([
         function (next) {
-            UserModel.findByIdAndUpdate(req.params.id,{$set: req.body}, function (err, result) {
-                if (err) return res.send({ 'error': 'Invalid user' });
+            UserModel.findByIdAndUpdate(req.params.id, { $set: req.body }, function (err, result) {
+                if (err) { responseHandler.sendError('Invalid user', res); }
                 else {
-                    next(null,result);
+                    next(null, result);
                 }
             })
         },
     ], function (err, result) {
         if (err) {
-            res.json({
-                success: false,
-                message: 'Operation failed',
-                errors: err
-            });
+            responseHandler.sendError(err, res);
         } else {
-            res.status(200).json({
-                success: false,
-                message: 'Operation successfull',
-            });
+            responseHandler.sendData({}, res);
         }
     });
+};
+
+exports.getLoginUsers = function (req, res) {
+    async.waterfall([
+        function (next) {
+            let dt = new Date();
+            userActivityModel.find({ 'created_at': { $lte: dt } }, function (err, result) {
+                if (err) {
+                    responseHandler.sendError(err, res);
+                } else if (result) {
+                    responseHandler.sendData(result, res);
+                } else {
+                    responseHandler.sendError('No record found', res);
+                }
+            });
+        }
+    ])
 }
